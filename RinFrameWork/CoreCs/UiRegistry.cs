@@ -2,21 +2,6 @@ using System.Collections.Generic;
 using UnityEngine;
 using System.Linq;
 
-/*
-Copyright (c) 2025 LiYun. All rights reserved.
-
-本框架（包括但不限于源代码、文档、二进制发行物及其修改版）由作者个人所有。
-未经作者书面授权，任何个人或组织不得复制、修改、分发、出售、再许可、合并
-或以其他方式将本框架用于商业或非商业用途。
-
-免责声明：
-本框架按“现状”提供，作者不对适销性、适用性或不侵权作出任何明示或暗示的保证。
-在任何情况下，因使用或无法使用本框架而导致的任何直接或间接损失，作者概不负责。
-
-联系作者以获取授权与支持：
-Email: deovolenterin@gmail.com
-*/
-
 [CreateAssetMenu(fileName = "UIRegistry", menuName = "UI System/Screen Registry")]
 public class UIRegistry : ScriptableObject
 {
@@ -29,6 +14,12 @@ public class UIRegistry : ScriptableObject
         public bool persistent;
         [Tooltip("首次使用后是否缓存")]
         public bool cacheAfterFirstUse;
+        
+        [Header("层级关系")]
+        [Tooltip("父节点的screenId，留空则放在根节点下")]
+        public string parentScreenId;
+        [Tooltip("在父节点下的特定Transform路径，如 'Content/ScrollView'")]
+        public string parentPath;
         
         public bool IsValid()
         {
@@ -48,6 +39,7 @@ public class UIRegistry : ScriptableObject
     private void OnValidate()
     {
         RebuildConfigMap();
+        ValidateHierarchy();
     }
 
     private void RebuildConfigMap()
@@ -62,6 +54,34 @@ public class UIRegistry : ScriptableObject
             }
             _configMap[config.screenId] = config;
         }
+    }
+    
+    private void ValidateHierarchy()
+    {
+        // 检查是否有循环依赖
+        foreach (var config in screens.Where(s => s.IsValid()))
+        {
+            if (HasCircularDependency(config.screenId, new HashSet<string>()))
+            {
+                Debug.LogError($"Circular dependency detected for screen: {config.screenId}");
+            }
+        }
+    }
+    
+    private bool HasCircularDependency(string screenId, HashSet<string> visited)
+    {
+        if (visited.Contains(screenId))
+            return true;
+            
+        visited.Add(screenId);
+        
+        var config = GetConfig(screenId);
+        if (config != null && !string.IsNullOrEmpty(config.parentScreenId))
+        {
+            return HasCircularDependency(config.parentScreenId, visited);
+        }
+        
+        return false;
     }
 
     public ScreenConfig GetConfig(string screenId)
@@ -87,5 +107,29 @@ public class UIRegistry : ScriptableObject
             RebuildConfigMap();
             
         return _configMap.ContainsKey(screenId);
+    }
+    
+    // 获取从根到目标节点的完整路径
+    public List<string> GetHierarchyPath(string screenId)
+    {
+        var path = new List<string>();
+        var visited = new HashSet<string>();
+        
+        while (!string.IsNullOrEmpty(screenId))
+        {
+            if (visited.Contains(screenId))
+            {
+                Debug.LogError($"Circular dependency detected at: {screenId}");
+                break;
+            }
+            
+            visited.Add(screenId);
+            path.Insert(0, screenId);
+            
+            var config = GetConfig(screenId);
+            screenId = config?.parentScreenId;
+        }
+        
+        return path;
     }
 }

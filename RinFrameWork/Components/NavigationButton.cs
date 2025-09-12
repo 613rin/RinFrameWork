@@ -33,7 +33,6 @@ public class NavigationButton : MonoBehaviour
     [SerializeField] private string targetScreenId;
     [SerializeField] private bool passParameter;
     [SerializeField] private string parameterValue;
-
     private Button _button;
 
     private void Awake()
@@ -41,7 +40,7 @@ public class NavigationButton : MonoBehaviour
         _button = GetComponent<Button>();
         _button.onClick.AddListener(OnButtonClick);
     }
-
+    public void NavigateNow() { OnButtonClick(); }
     private void OnDestroy()
     {
         if (_button != null)
