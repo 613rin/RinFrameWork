@@ -3,7 +3,7 @@ using UnityEngine;
 using UnityEngine.Events;
 
 [RequireComponent(typeof(CanvasGroup))]
-public class UIScreen : MonoBehaviour
+public class UIScreen: MonoBehaviour
 {
     [SerializeField] private string screenId;
     [Header("自定义过渡设置")]

@@ -491,6 +491,9 @@ public class UIRouter : MonoBehaviour
             var target = _stack.Peek();
             bool wasInactive = !target.gameObject.activeSelf;
 
+            // 添加这一行：确保目标界面的所有父界面都被激活
+            EnsureAncestorsActive(targetId);
+
             if (wasInactive)
             {
                 var targetTransition = GetTransitionForScreen(target);
@@ -502,7 +505,7 @@ public class UIRouter : MonoBehaviour
             target.OnResume();
             target.OnRefresh(param);
 
-            // 新增：互斥（保证回到 target 时，其他顶层/同层兄弟被失活）
+            // 互斥（保证回到 target 时，其他顶层/同层兄弟被失活）
             EnforceExclusivityAlongPath(targetId);
         }
 
