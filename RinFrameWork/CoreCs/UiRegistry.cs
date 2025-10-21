@@ -10,10 +10,14 @@ public class UIRegistry : ScriptableObject
     {
         public string screenId;
         public GameObject prefab;
-        [Tooltip("界面是否常驻内存")]
+        
+        [Header("缓存策略")]
+        [Tooltip("界面是否常驻内存（永不销毁）")]
         public bool persistent;
-        [Tooltip("首次使用后是否缓存")]
+        [Tooltip("首次使用后是否缓存（失活时保留在内存中）")]
         public bool cacheAfterFirstUse;
+        [Tooltip("每次失活时销毁，下次进入重新创建（保持预制体初始状态）")]
+        public bool destroyOnDeactivate; // ✅ 新增字段
         
         [Header("层级关系")]
         [Tooltip("父节点的screenId，留空则放在根节点下")]
@@ -40,6 +44,7 @@ public class UIRegistry : ScriptableObject
     {
         RebuildConfigMap();
         ValidateHierarchy();
+        ValidateCacheSettings(); // ✅ 新增：验证缓存设置冲突
     }
 
     private void RebuildConfigMap()
@@ -53,6 +58,24 @@ public class UIRegistry : ScriptableObject
                 continue;
             }
             _configMap[config.screenId] = config;
+        }
+    }
+    
+    // ✅ 新增：验证缓存策略冲突
+    private void ValidateCacheSettings()
+    {
+        foreach (var config in screens.Where(s => s.IsValid()))
+        {
+            // 如果勾选了 destroyOnDeactivate，自动取消其他缓存选项
+            if (config.destroyOnDeactivate)
+            {
+                if (config.persistent || config.cacheAfterFirstUse)
+                {
+                    Debug.LogWarning($"[{config.screenId}] 'destroyOnDeactivate' 与缓存选项冲突，已自动禁用缓存。");
+                    config.persistent = false;
+                    config.cacheAfterFirstUse = false;
+                }
+            }
         }
     }
     

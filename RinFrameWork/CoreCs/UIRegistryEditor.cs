@@ -484,122 +484,192 @@ public class UIRegistryEditor : Editor
     private void DrawScreenConfig(SerializedProperty screen, SerializedProperty allScreens)
     {
         // 📋 基础配置
-        EditorGUILayout.LabelField("📋 基础配置", EditorStyles.boldLabel);
+    EditorGUILayout.LabelField("📋 基础配置", EditorStyles.boldLabel);
+    EditorGUILayout.Space(5);
+
+    // 界面 ID（延迟提交）
+    var screenIdProp = screen.FindPropertyRelative("screenId");
+    EditorGUI.BeginChangeCheck();
+    string newScreenId = EditorGUILayout.DelayedTextField(
+        new GUIContent("界面 ID", "界面的唯一标识符"),
+        screenIdProp.stringValue
+    );
+    if (EditorGUI.EndChangeCheck())
+    {
+        Undo.RecordObject(serializedObject.targetObject, "Edit Screen ID");
+        screenIdProp.stringValue = newScreenId;
+        serializedObject.ApplyModifiedProperties();
+    }
+
+    // 预制体（正常绘制，不需要延迟）
+    EditorGUILayout.PropertyField(screen.FindPropertyRelative("prefab"), 
+        new GUIContent("预制体", "当前界面的预制体文件"));
+
+    EditorGUILayout.Space(10);
+
+    // ⚡ 缓存策略
+    EditorGUILayout.LabelField("⚡ 缓存策略", EditorStyles.boldLabel);
+    EditorGUILayout.Space(5);
+    
+    var destroyOnDeactivateProp = screen.FindPropertyRelative("destroyOnDeactivate");
+    var persistentProp = screen.FindPropertyRelative("persistent");
+    var cacheAfterFirstUseProp = screen.FindPropertyRelative("cacheAfterFirstUse");
+    
+    // ✅ 新增：destroyOnDeactivate 字段
+    EditorGUI.BeginChangeCheck();
+    EditorGUILayout.PropertyField(destroyOnDeactivateProp, 
+        new GUIContent("每次重新创建", "失活时销毁，下次进入重新创建（保持预制体初始状态）"));
+    
+    if (EditorGUI.EndChangeCheck() && destroyOnDeactivateProp.boolValue)
+    {
+        // 如果勾选了 destroyOnDeactivate，自动取消其他缓存选项
+        persistentProp.boolValue = false;
+        cacheAfterFirstUseProp.boolValue = false;
+    }
+    
+    // ✅ 修改：其他缓存选项在 destroyOnDeactivate 启用时禁用
+    EditorGUI.BeginDisabledGroup(destroyOnDeactivateProp.boolValue);
+    
+    EditorGUI.BeginChangeCheck();
+    EditorGUILayout.PropertyField(persistentProp, 
+        new GUIContent("持久化", "界面常驻内存，永不销毁"));
+    
+    if (EditorGUI.EndChangeCheck() && persistentProp.boolValue)
+    {
+        cacheAfterFirstUseProp.boolValue = false;
+        destroyOnDeactivateProp.boolValue = false;
+    }
+    
+    EditorGUI.BeginChangeCheck();
+    EditorGUILayout.PropertyField(cacheAfterFirstUseProp, 
+        new GUIContent("首次后缓存", "首次使用后缓存，下次使用更快"));
+    
+    if (EditorGUI.EndChangeCheck() && cacheAfterFirstUseProp.boolValue)
+    {
+        persistentProp.boolValue = false;
+        destroyOnDeactivateProp.boolValue = false;
+    }
+    
+    EditorGUI.EndDisabledGroup();
+    
+    // ✅ 添加提示信息
+    if (destroyOnDeactivateProp.boolValue)
+    {
+        EditorGUILayout.HelpBox(
+            "💡 此界面每次进入时都会重新创建，保持预制体的初始状态。\n适用于表单、游戏关卡等需要重置状态的界面。",
+            MessageType.Info);
+    }
+    else if (persistentProp.boolValue)
+    {
+        EditorGUILayout.HelpBox(
+            "💾 此界面常驻内存，永不销毁。适用于主界面、导航栏等常驻界面。", 
+            MessageType.Info);
+    }
+    else if (cacheAfterFirstUseProp.boolValue)
+    {
+        EditorGUILayout.HelpBox(
+            "📦 此界面首次使用后会缓存，保留上次的状态。适用于常用界面。", 
+            MessageType.Info);
+    }
+    else
+    {
+        EditorGUILayout.HelpBox(
+            "🔄 此界面每次都会重新创建（默认行为）。", 
+            MessageType.None);
+    }
+
+    EditorGUILayout.Space(10);
+
+    // 🌳 层级设置
+    EditorGUILayout.LabelField("🌳 层级设置", EditorStyles.boldLabel);
+    EditorGUILayout.Space(5);
+
+    // 父界面 ID（延迟提交）
+    var parentIdProp = screen.FindPropertyRelative("parentScreenId");
+    EditorGUI.BeginChangeCheck();
+    string newParentId = EditorGUILayout.DelayedTextField(
+        new GUIContent("父界面 ID", "父界面的Screen ID，留空则生成在UIRouter根节点下"),
+        parentIdProp.stringValue
+    );
+    if (EditorGUI.EndChangeCheck())
+    {
+        Undo.RecordObject(serializedObject.targetObject, "Edit Parent Screen ID");
+        parentIdProp.stringValue = newParentId;
+        serializedObject.ApplyModifiedProperties();
+    }
+
+    // 只有在 parentId 真正有值时才去做父 prefab 查找与提示
+    GameObject parentPrefab = null;
+    string parentScreenId = parentIdProp.stringValue;
+    bool parentHasPrefab = false;
+
+    if (!string.IsNullOrEmpty(parentScreenId))
+    {
+        for (int i = 0; i < allScreens.arraySize; i++)
+        {
+            var s = allScreens.GetArrayElementAtIndex(i);
+            if (s.FindPropertyRelative("screenId").stringValue == parentScreenId)
+            {
+                parentPrefab = s.FindPropertyRelative("prefab").objectReferenceValue as GameObject;
+                parentHasPrefab = parentPrefab != null;
+                break;
+            }
+        }
+
+        if (!parentHasPrefab)
+        {
+            EditorGUILayout.HelpBox(
+                $"⚠️ 父界面 '{parentScreenId}' 未设置预制体，无法使用路径助手", 
+                MessageType.Warning);
+        }
+    }
+
+    // 父节点路径
+    var pathProp = screen.FindPropertyRelative("parentPath");
+    EditorGUILayout.BeginHorizontal();
+    EditorGUILayout.PropertyField(pathProp, 
+        new GUIContent("父节点路径", "在父界面中的具体位置，留空则生成在父界面根节点下"));
+
+    EditorGUI.BeginDisabledGroup(string.IsNullOrEmpty(parentScreenId) || !parentHasPrefab);
+    if (GUILayout.Button(new GUIContent("📍", parentHasPrefab ? "选择父界面中的挂载位置" : "需要先设置父界面及其预制体"), 
+        GUILayout.Width(30)))
+    {
+        if (parentPrefab != null)
+        {
+            PathHelperWindow.ShowWindow(parentPrefab, parentScreenId, (path) =>
+            {
+                pathProp.stringValue = path;
+                serializedObject.ApplyModifiedProperties();
+            });
+        }
+    }
+    EditorGUI.EndDisabledGroup();
+    EditorGUILayout.EndHorizontal();
+
+    // 生成位置提示
+    if (!string.IsNullOrEmpty(parentScreenId))
+    {
+        var fullPath = string.IsNullOrEmpty(pathProp.stringValue)
+            ? $"{parentScreenId} (根节点)"
+            : $"{parentScreenId}/{pathProp.stringValue}";
+        EditorGUILayout.HelpBox($"📍 生成位置: {fullPath}", MessageType.None);
+    }
+    else
+    {
+        EditorGUILayout.HelpBox("📍 生成位置: UIRouter 根节点", MessageType.None);
+    }
+
+    // 预制体预览
+    var prefab = screen.FindPropertyRelative("prefab").objectReferenceValue as GameObject;
+    if (prefab != null)
+    {
         EditorGUILayout.Space(5);
-
-        // 界面 ID（延迟提交）
-        var screenIdProp = screen.FindPropertyRelative("screenId");
-        EditorGUI.BeginChangeCheck();
-        string newScreenId = EditorGUILayout.DelayedTextField(
-            new GUIContent("界面 ID", "界面的唯一标识符"),
-            screenIdProp.stringValue
-        );
-        if (EditorGUI.EndChangeCheck())
+        if (GUILayout.Button("👁️ 预览当前界面预制体", GUILayout.Height(25)))
         {
-            Undo.RecordObject(serializedObject.targetObject, "Edit Screen ID");
-            screenIdProp.stringValue = newScreenId;
-            serializedObject.ApplyModifiedProperties(); // 仅在提交时写回
+            Selection.activeObject = prefab;
+            EditorGUIUtility.PingObject(prefab);
         }
-
-        // 预制体（正常绘制，不需要延迟）
-        EditorGUILayout.PropertyField(screen.FindPropertyRelative("prefab"), new GUIContent("预制体", "当前界面的预制体文件"));
-
-        EditorGUILayout.Space(10);
-
-        // ⚡ 性能优化
-        EditorGUILayout.LabelField("⚡ 性能优化", EditorStyles.boldLabel);
-        EditorGUILayout.Space(5);
-        EditorGUILayout.PropertyField(screen.FindPropertyRelative("persistent"), new GUIContent("持久化", "界面是否常驻内存"));
-        EditorGUILayout.PropertyField(screen.FindPropertyRelative("cacheAfterFirstUse"), new GUIContent("首次后缓存", "首次使用后是否缓存"));
-
-        EditorGUILayout.Space(10);
-
-        // 🌳 层级设置
-        EditorGUILayout.LabelField("🌳 层级设置", EditorStyles.boldLabel);
-        EditorGUILayout.Space(5);
-
-        // 父界面 ID（延迟提交）
-        var parentIdProp = screen.FindPropertyRelative("parentScreenId");
-        EditorGUI.BeginChangeCheck();
-        string newParentId = EditorGUILayout.DelayedTextField(
-            new GUIContent("父界面 ID", "父界面的Screen ID，留空则生成在UIRouter根节点下"),
-            parentIdProp.stringValue
-        );
-        if (EditorGUI.EndChangeCheck())
-        {
-            Undo.RecordObject(serializedObject.targetObject, "Edit Parent Screen ID");
-            parentIdProp.stringValue = newParentId;
-            serializedObject.ApplyModifiedProperties(); // 仅在提交时写回
-        }
-
-        // 只有在 parentId 真正有值时才去做父 prefab 查找与提示
-        GameObject parentPrefab = null;
-        string parentScreenId = parentIdProp.stringValue;
-        bool parentHasPrefab = false;
-
-        if (!string.IsNullOrEmpty(parentScreenId))
-        {
-            for (int i = 0; i < allScreens.arraySize; i++)
-            {
-                var s = allScreens.GetArrayElementAtIndex(i);
-                if (s.FindPropertyRelative("screenId").stringValue == parentScreenId)
-                {
-                    parentPrefab = s.FindPropertyRelative("prefab").objectReferenceValue as GameObject;
-                    parentHasPrefab = parentPrefab != null;
-                    break;
-                }
-            }
-
-            if (!parentHasPrefab)
-            {
-                EditorGUILayout.HelpBox($"父界面 '{parentScreenId}' 未设置预制体，无法使用路径助手", MessageType.Warning);
-            }
-        }
-
-        // 父节点路径（可保持原样）
-        var pathProp = screen.FindPropertyRelative("parentPath");
-        EditorGUILayout.BeginHorizontal();
-        EditorGUILayout.PropertyField(pathProp, new GUIContent("父节点路径", "在父界面中的具体位置，留空则生成在父界面根节点下"));
-
-        EditorGUI.BeginDisabledGroup(string.IsNullOrEmpty(parentScreenId) || !parentHasPrefab);
-        if (GUILayout.Button(new GUIContent("📍", parentHasPrefab ? "选择父界面中的挂载位置" : "需要先设置父界面及其预制体"), GUILayout.Width(30)))
-        {
-            if (parentPrefab != null)
-            {
-                PathHelperWindow.ShowWindow(parentPrefab, parentScreenId, (path) =>
-                {
-                    pathProp.stringValue = path;
-                    serializedObject.ApplyModifiedProperties();
-                });
-            }
-        }
-
-        EditorGUI.EndDisabledGroup();
-        EditorGUILayout.EndHorizontal();
-
-        if (!string.IsNullOrEmpty(parentScreenId))
-        {
-            var fullPath = string.IsNullOrEmpty(pathProp.stringValue)
-                ? $"{parentScreenId} (根节点)"
-                : $"{parentScreenId}/{pathProp.stringValue}";
-            EditorGUILayout.HelpBox($"生成位置: {fullPath}", MessageType.None);
-        }
-        else
-        {
-            EditorGUILayout.HelpBox("生成位置: UIRouter 根节点", MessageType.None);
-        }
-
-        // 预制体预览（原样）
-        var prefab = screen.FindPropertyRelative("prefab").objectReferenceValue as GameObject;
-        if (prefab != null)
-        {
-            EditorGUILayout.Space(5);
-            if (GUILayout.Button("👁️ 预览当前界面预制体", GUILayout.Height(25)))
-            {
-                Selection.activeObject = prefab;
-                EditorGUIUtility.PingObject(prefab);
-            }
-        }
+    }
     }
 
 

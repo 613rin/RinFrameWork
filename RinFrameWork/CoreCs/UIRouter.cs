@@ -62,6 +62,8 @@ public class UIRouter : MonoBehaviour
         InitializeUIRoot();
     }
 
+    
+    // 自动导航到首页
     private void Start()
     {
         if (!string.IsNullOrEmpty(homeScreenId))
@@ -73,6 +75,7 @@ public class UIRouter : MonoBehaviour
         if (transitionConfig != null)
             _transition = transitionConfig.CreateTransition();
         else
+        //原本就写好了一个过度方法，如果没有配置过度方法，就用这个
             _transition = new FadeTransition();
     }
 
@@ -164,7 +167,7 @@ public class UIRouter : MonoBehaviour
         }
         else
         {
-            Debug.Log("Registry validation passed!");
+            Debug.Log("检验通过!");
         }
     }
     
@@ -188,12 +191,21 @@ public class UIRouter : MonoBehaviour
     private void EnsureAncestorsActive(string screenId)
     {
         if (registry == null || string.IsNullOrEmpty(screenId)) return;
-        var path = registry.GetHierarchyPath(screenId); // 从顶层到目标的有序列表
-        foreach (var id in path)
+    
+        var config = registry.GetConfig(screenId);
+        if (config == null) return;
+    
+        // ✅ 只处理父界面及其祖先
+        if (!string.IsNullOrEmpty(config.parentScreenId))
         {
-            var s = GetOrCreateScreen(id);
-            if (s != null && !s.gameObject.activeSelf)
-                s.gameObject.SetActive(true);
+            // 递归激活父界面及其祖先
+            var parentPath = registry.GetHierarchyPath(config.parentScreenId);
+            foreach (var id in parentPath)
+            {
+                var s = GetOrCreateScreen(id);
+                if (s != null && !s.gameObject.activeSelf)
+                    s.gameObject.SetActive(true);
+            }
         }
     }
 
@@ -319,19 +331,27 @@ public class UIRouter : MonoBehaviour
         var next = GetOrCreateScreen(screenId);
         if (next == null) { _transitioning = false; yield break; }
 
-        // 新增：先确保父链激活（一级等父级必须可见）
+        // 确保父链激活
         EnsureAncestorsActive(screenId);
 
         var transition = GetTransitionForScreen(next);
         PrepareScreen(next, transition);
         next.OnEnter(param);
 
-        if (current != null && !next.IsOverlay)
+        // ✅ 修改：检查新界面是否是当前界面的子界面
+        bool isChildOfCurrent = IsChildScreen(screenId, current?.ScreenId);
+
+        if (current != null && !next.IsOverlay && !isChildOfCurrent)  // ✅ 添加判断
         {
             current.OnPause();
             var exitTransition = GetTransitionForScreen(current);
             yield return exitTransition.TransitionOut(current);
             current.gameObject.SetActive(false);
+        }
+        else if (current != null && isChildOfCurrent)  // ✅ 如果是子界面，只暂停父界面
+        {
+            current.OnPause();
+            // 不失活父界面，因为子界面需要显示在父界面上
         }
 
         yield return transition.TransitionIn(next);
@@ -339,7 +359,6 @@ public class UIRouter : MonoBehaviour
         FinalizeScreen(next, transition);
         _stack.Push(next);
 
-        // 新增：沿路径做互斥（顶层/各层仅保留本路径）
         EnforceExclusivityAlongPath(screenId);
 
         UIEvents.NotifyScreenPushed(screenId);
@@ -347,6 +366,43 @@ public class UIRouter : MonoBehaviour
         _transitioning = false;
     }
 
+    /// <summary>
+    /// 检查childId是否是parentId的子界面（直接或间接）
+    /// </summary>
+    private bool IsChildScreen(string childId, string parentId)
+    {
+        if (string.IsNullOrEmpty(childId) || string.IsNullOrEmpty(parentId))
+            return false;
+    
+        var childConfig = registry?.GetConfig(childId);
+        if (childConfig == null)
+            return false;
+    
+        // 检查直接父子关系
+        if (childConfig.parentScreenId == parentId)
+            return true;
+    
+        // 检查间接父子关系（递归向上查找）
+        var currentParentId = childConfig.parentScreenId;
+        var visited = new HashSet<string>(); // 防止循环依赖
+    
+        while (!string.IsNullOrEmpty(currentParentId))
+        {
+            if (visited.Contains(currentParentId))
+                break; // 检测到循环
+        
+            visited.Add(currentParentId);
+        
+            if (currentParentId == parentId)
+                return true;
+        
+            var parentConfig = registry?.GetConfig(currentParentId);
+            currentParentId = parentConfig?.parentScreenId;
+        }
+    
+        return false;
+    }
+    
     private IEnumerator PopRoutine()
     {
         _transitioning = true;
@@ -525,23 +581,24 @@ public class UIRouter : MonoBehaviour
             Debug.LogError($"Circular dependency detected when creating screen: {screenId}");
             return null;
         }
-        // 检查缓存
-        if (_cache.TryGetValue(screenId, out var cached) && cached != null)
+    
+        // ✅ 修改：获取配置，检查是否应该使用缓存
+        var config = registry?.GetConfig(screenId);
+        if (config == null)
+        {
+            Debug.LogError($"No configuration found for screen: {screenId}");
+            return null;
+        }
+    
+        // ✅ 如果设置了 destroyOnDeactivate，则不使用缓存（总是重新创建）
+        if (!config.destroyOnDeactivate && _cache.TryGetValue(screenId, out var cached) && cached != null)
             return cached;
+    
         // 标记正在创建
         _creatingScreens.Add(screenId);
 
         try
         {
-
-            // 获取配置
-            var config = registry?.GetConfig(screenId);
-            if (config == null)
-            {
-                Debug.LogError($"No configuration found for screen: {screenId}");
-                return null;
-            }
-
             // 确定父节点
             Transform parent = DetermineParent(config);
             if (parent == null)
@@ -553,7 +610,7 @@ public class UIRouter : MonoBehaviour
             // 创建实例
             var instance = Instantiate(config.prefab, parent);
             var screen = instance.GetComponent<UIScreen>();
-        
+    
             if (screen == null)
             {
                 Debug.LogError($"Prefab for {screenId} has no UIScreen component");
@@ -562,28 +619,26 @@ public class UIRouter : MonoBehaviour
             }
 
             screen.ScreenId = screenId;
-            // 添加：更新父子映射
             UpdateParentChildMapping(screenId, config.parentScreenId);
-        
-            // 添加：处理Context继承
+    
+            // 处理Context继承
             if (!string.IsNullOrEmpty(config.parentScreenId))
             {
                 StartCoroutine(SetupContextInheritance(screen, config.parentScreenId));
             }
-            // 处理缓存
-            if (config.persistent || config.cacheAfterFirstUse)
+        
+            // ✅ 修改：只有在不是 destroyOnDeactivate 时才缓存
+            if (!config.destroyOnDeactivate && (config.persistent || config.cacheAfterFirstUse))
             {
                 _cache[screenId] = screen;
             }
 
             return screen;
         }
-        
         finally
         {
             _creatingScreens.Remove(screenId);
         }
-        
     }
     
     // 添加新方法：延迟处理Context继承
@@ -677,7 +732,7 @@ public class UIRouter : MonoBehaviour
     private void ReleaseScreen(UIScreen screen)
     {
         if (screen == null) return;
-        
+    
         // 先释放所有子界面
         var children = GetChildScreens(screen.ScreenId);
         foreach (var child in children)
@@ -686,6 +741,17 @@ public class UIRouter : MonoBehaviour
         }
 
         var config = registry?.GetConfig(screen.ScreenId);
+    
+        // ✅ 修改：如果设置了 destroyOnDeactivate，总是销毁
+        if (config != null && config.destroyOnDeactivate)
+        {
+            Debug.Log($"[UIRouter] 销毁界面（每次重新创建）: {screen.ScreenId}");
+            Destroy(screen.gameObject);
+            _cache.Remove(screen.ScreenId);
+            return;
+        }
+    
+        // 原有的缓存逻辑
         bool shouldCache = config != null && (config.persistent || config.cacheAfterFirstUse);
 
         if (shouldCache && _cache.ContainsKey(screen.ScreenId))
