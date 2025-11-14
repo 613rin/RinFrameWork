@@ -514,7 +514,17 @@ public class UIRegistryEditor : Editor
     var destroyOnDeactivateProp = screen.FindPropertyRelative("destroyOnDeactivate");
     var persistentProp = screen.FindPropertyRelative("persistent");
     var cacheAfterFirstUseProp = screen.FindPropertyRelative("cacheAfterFirstUse");
+    // ✅ 新增：检查是否是父界面
+    bool isParentScreen = IsParentScreen(screenIdProp.stringValue, allScreens);
     
+    if (isParentScreen && !persistentProp.boolValue && !cacheAfterFirstUseProp.boolValue && !destroyOnDeactivateProp.boolValue)
+    {
+        EditorGUILayout.HelpBox(
+            "⚠️ 警告：此界面是其他界面的父界面，但未启用缓存！\n" +
+            "每次创建子界面都会重复创建父界面，导致场景中出现多个实例。\n" +
+            "建议启用'持久化'或'首次后缓存'。",
+            MessageType.Warning);
+    }
     // ✅ 新增：destroyOnDeactivate 字段
     EditorGUI.BeginChangeCheck();
     EditorGUILayout.PropertyField(destroyOnDeactivateProp, 
@@ -672,7 +682,21 @@ public class UIRegistryEditor : Editor
     }
     }
 
-
+// ✅ 添加辅助方法：检查是否是父界面
+    private bool IsParentScreen(string screenId, SerializedProperty allScreens)
+    {
+        if (string.IsNullOrEmpty(screenId)) return false;
+    
+        for (int i = 0; i < allScreens.arraySize; i++)
+        {
+            var s = allScreens.GetArrayElementAtIndex(i);
+            var parentId = s.FindPropertyRelative("parentScreenId").stringValue;
+            if (parentId == screenId)
+                return true;
+        }
+    
+        return false;
+    }
 private void SetAllFoldouts(bool value)
     {
         // 全部展开/折叠：直接改字典

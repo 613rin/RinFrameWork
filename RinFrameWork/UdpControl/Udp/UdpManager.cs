@@ -17,7 +17,7 @@ namespace BigHead
         Dictionary<SendCommond, Coroutine> m_SendSequeue;
         public static UdpManager Instance { get; private set; }
         [System.Serializable]
-        public class ReceivedDataEvent : UnityEvent<string>
+        public class ReceivedDataEvent : UnityEvent<byte[]>
         {
 
         }
@@ -84,7 +84,7 @@ namespace BigHead
                     Debug.Log($"接收消息来自 {endPoint}: {message}");
 
                 //处理信息
-                AnalyzeInfo(message);
+                AnalyzeInfo(receivedBytes);
 
                 // 继续异步接收下一条消息
                 client.BeginReceive(ReceiveCallback, client);
@@ -94,7 +94,7 @@ namespace BigHead
                 Debug.LogException(ex);
             }
         }
-        void AnalyzeInfo(string info)
+        void AnalyzeInfo(byte[] info)
         {
             Task.Run(async () =>
             {

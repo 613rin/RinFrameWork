@@ -134,6 +134,7 @@ public class UIRouter : MonoBehaviour
     
         var allScreenIds = registry.GetAllScreenIds();
         var errors = new List<string>();
+        var warnings = new List<string>();
     
         foreach (var screenId in allScreenIds)
         {
@@ -154,20 +155,34 @@ public class UIRouter : MonoBehaviour
             // 检查循环依赖
             if (HasCircularDependency(screenId, new HashSet<string>()))
                 errors.Add($"{screenId}: Circular dependency detected");
+            
+            // ✅ 新增：检查父界面缓存
+            if (HasChildScreens(screenId))
+            {
+                if (!config.persistent && !config.cacheAfterFirstUse && !config.destroyOnDeactivate)
+                {
+                    warnings.Add($"{screenId}: 是父界面但未启用缓存，可能导致重复创建（已自动修复）");
+                }
+            }
         }
         
-        
-        
-    
         if (errors.Count > 0)
         {
             Debug.LogError($"Registry validation failed with {errors.Count} errors:");
             foreach (var error in errors)
                 Debug.LogError($"  - {error}");
         }
-        else
+        
+        if (warnings.Count > 0)
         {
-            Debug.Log("检验通过!");
+            Debug.LogWarning($"Registry validation found {warnings.Count} warnings:");
+            foreach (var warning in warnings)
+                Debug.LogWarning($"  - {warning}");
+        }
+        
+        if (errors.Count == 0 && warnings.Count == 0)
+        {
+            Debug.Log("✅ 检验通过！");
         }
     }
     
@@ -182,6 +197,22 @@ public class UIRouter : MonoBehaviour
         if (config != null && !string.IsNullOrEmpty(config.parentScreenId))
             return HasCircularDependency(config.parentScreenId, visited);
     
+        return false;
+    }
+    
+    // ✅ 新增：检查是否有子界面
+    private bool HasChildScreens(string screenId)
+    {
+        var allScreenIds = registry?.GetAllScreenIds();
+        if (allScreenIds == null) return false;
+        
+        foreach (var id in allScreenIds)
+        {
+            var config = registry.GetConfig(id);
+            if (config != null && config.parentScreenId == screenId)
+                return true;
+        }
+        
         return false;
     }
 
@@ -209,7 +240,7 @@ public class UIRouter : MonoBehaviour
         }
     }
 
-    // 沿路径逐层做“同父互斥”，并对 Root 顶层也做互斥
+    // 沿路径逐层做"同父互斥"，并对 Root 顶层也做互斥
     private void EnforceExclusivityAlongPath(string screenId)
     {
         if (registry == null || string.IsNullOrEmpty(screenId)) return;
@@ -582,7 +613,6 @@ public class UIRouter : MonoBehaviour
             return null;
         }
     
-        // ✅ 修改：获取配置，检查是否应该使用缓存
         var config = registry?.GetConfig(screenId);
         if (config == null)
         {
@@ -627,10 +657,20 @@ public class UIRouter : MonoBehaviour
                 StartCoroutine(SetupContextInheritance(screen, config.parentScreenId));
             }
         
-            // ✅ 修改：只有在不是 destroyOnDeactivate 时才缓存
-            if (!config.destroyOnDeactivate && (config.persistent || config.cacheAfterFirstUse))
+            // ✅ 修复：检查是否有子界面
+            bool hasChildren = HasChildScreens(screenId);
+            
+            // ✅ 修改缓存条件：作为父界面的必须缓存
+            if (!config.destroyOnDeactivate && 
+                (config.persistent || config.cacheAfterFirstUse || hasChildren))
             {
                 _cache[screenId] = screen;
+                
+                // ✅ 添加警告：如果是父界面但用户未启用缓存
+                if (hasChildren && !config.persistent && !config.cacheAfterFirstUse)
+                {
+                    Debug.LogWarning($"[UIRouter] '{screenId}' 是父界面但未启用缓存，已自动缓存以避免重复创建。\n建议在UIRegistry中启用'持久化'或'首次后缓存'。");
+                }
             }
 
             return screen;
@@ -711,20 +751,6 @@ public class UIRouter : MonoBehaviour
                     children.Add(screen);
             }
         }
-
-        #region  旧的实现
-
-        // foreach (var kvp in _cache)
-        // {
-        //     var config = registry?.GetConfig(kvp.Key);
-        //     if (config != null && config.parentScreenId == parentScreenId && kvp.Value != null)
-        //     {
-        //         children.Add(kvp.Value);
-        //     }
-        // }
-
-        #endregion
-      
         
         return children;
     }
